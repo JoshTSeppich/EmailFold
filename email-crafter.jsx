@@ -25,9 +25,6 @@ const T = {
   violet:       "#7C3AED",
   violetBg:     "#F5F3FF",
   violetBorder: "#DDD6FE",
-  pink:         "#DB2777",
-  pinkBg:       "#FDF2F8",
-  pinkBorder:   "#FBCFE8",
   shadow:       "0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)",
   shadowMd:     "0 4px 6px rgba(0,0,0,0.06), 0 2px 4px rgba(0,0,0,0.04)",
   radius:       8,
@@ -43,16 +40,73 @@ const EMAIL_GOALS = [
   { value: "demo_request", label: "Request a Demo" },
 ];
 
-const ANGLE_COLORS = {
-  "Pain Point Hook":   { color: T.red,    bg: T.redBg,    border: T.redBorder },
-  "Recent News Hook":  { color: T.amber,  bg: T.amberBg,  border: T.amberBorder },
-  "Tech Stack Hook":   { color: T.violet, bg: T.violetBg, border: T.violetBorder },
-};
-
 const LS_KEY_API     = "emailfold_apikey";
 const LS_KEY_PRODUCT = "emailfold_product";
 const LS_KEY_HISTORY = "emailfold_history";
 const LS_KEY_SENDER  = "emailfold_sender";
+const LS_KEY_INTEL   = "emailfold_intel_raw";
+
+// ── Intel Package Parser ──────────────────────────────────────────────────────
+// Handles both the JSON bridge format (from → EmailFold button) and raw Markdown paste.
+function parseIntel(text) {
+  if (!text?.trim()) return null;
+
+  // Try JSON bridge format first
+  try {
+    const json = JSON.parse(text.trim());
+    if (json.__emailfold) {
+      return {
+        naicsCode:            json.naicsCode || "",
+        naicsLabel:           json.naicsLabel || "",
+        summary:              json.summary || "",
+        angles:               json.angles || [],
+        signals:              json.signals || [],
+        qualifying_criteria:  json.qualifying_criteria || [],
+        red_flags:            json.red_flags || [],
+        _source:              "json",
+      };
+    }
+  } catch {}
+
+  // Parse Markdown format (ProspectFold "Copy Markdown" output)
+  const intel = { naicsCode: "", naicsLabel: "", summary: "", angles: [], signals: [], qualifying_criteria: [], red_flags: [], _source: "markdown" };
+
+  // Summary
+  const summaryM = text.match(/## Summary\n([\s\S]*?)(?=\n##)/);
+  if (summaryM) intel.summary = summaryM[1].trim();
+
+  // ICP signals
+  const signalsM = text.match(/\*\*Signals:\*\*\n([\s\S]*?)(?=\n\*\*|\n##)/);
+  if (signalsM) intel.signals = (signalsM[1].match(/- (.+)/g) || []).map(s => s.replace(/^- /, "").trim());
+
+  // Qualifying criteria
+  const criteriaM = text.match(/\*\*Qualifying Criteria:\*\*\n([\s\S]*?)(?=\n\*\*|\n##)/);
+  if (criteriaM) intel.qualifying_criteria = (criteriaM[1].match(/- (.+)/g) || []).map(s => s.replace(/^- /, "").trim());
+
+  // Sales angles
+  const anglesSection = text.match(/## Sales Angles\n([\s\S]*?)(?=\n## |$)/);
+  if (anglesSection) {
+    const blocks = anglesSection[1].split(/(?=### )/);
+    for (const block of blocks) {
+      const nameM       = block.match(/### (.+)/);
+      const hypoM       = block.match(/\*\*Hypothesis:\*\* ([\s\S]*?)(?=\*\*Hook)/);
+      const hookM       = block.match(/\*\*Hook:\*\* (.+)/);
+      if (nameM && hookM) {
+        intel.angles.push({
+          name:       nameM[1].trim(),
+          hypothesis: hypoM ? hypoM[1].trim() : "",
+          hook:       hookM[1].trim(),
+        });
+      }
+    }
+  }
+
+  // Red flags
+  const redM = text.match(/## Red Flags\n([\s\S]*?)(?=\n##|$)/);
+  if (redM) intel.red_flags = (redM[1].match(/- (.+)/g) || []).map(s => s.replace(/^- /, "").trim());
+
+  return intel.angles.length > 0 ? intel : null;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function timeAgo(ts) {
@@ -84,14 +138,9 @@ function CopyButton({ text, label = "Copy", successLabel = "Copied!" }) {
         background:   copied ? T.greenBg  : T.accentBg,
         border:      `1px solid ${copied ? T.greenBorder : T.accentBorder}`,
         color:        copied ? T.green    : T.accent,
-        borderRadius: T.radiusSm,
-        padding:      "4px 12px",
-        fontSize:     12,
-        fontWeight:   600,
-        cursor:       "pointer",
-        fontFamily:   "inherit",
-        transition:   "all 0.15s",
-        whiteSpace:   "nowrap",
+        borderRadius: T.radiusSm, padding: "4px 12px",
+        fontSize: 12, fontWeight: 600, cursor: "pointer",
+        fontFamily: "inherit", transition: "all 0.15s", whiteSpace: "nowrap",
       }}
     >
       {copied ? successLabel : label}
@@ -99,60 +148,78 @@ function CopyButton({ text, label = "Copy", successLabel = "Copied!" }) {
   );
 }
 
-function Tag({ children, color = T.accent, bg = T.accentBg, border = T.accentBorder }) {
-  return (
-    <span style={{
-      background: bg, color, border: `1px solid ${border}`,
-      borderRadius: 4, padding: "3px 9px", fontSize: 12, fontWeight: 500,
-      display: "inline-block", margin: "2px 3px 2px 0",
-    }}>
-      {children}
-    </span>
-  );
-}
-
-function SectionHeader({ title, accent = T.accent, action }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-      <div style={{
-        fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: accent,
-        textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6,
-      }}>
-        <span style={{ display: "inline-block", width: 3, height: 14, background: accent, borderRadius: 2 }} />
-        {title}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-function Card({ children, style }) {
-  return (
-    <div style={{
-      background: T.surface, border: `1px solid ${T.border}`,
-      borderRadius: T.radius, padding: "18px 20px",
-      marginBottom: 12, boxShadow: T.shadow, ...style,
-    }}>
-      {children}
-    </div>
-  );
+function Divider() {
+  return <hr style={{ border: "none", borderTop: `1px solid ${T.border}`, margin: "14px 0" }} />;
 }
 
 function FieldLabel({ children }) {
   return (
     <div style={{
       fontSize: 11, fontWeight: 700, color: T.textMuted,
-      letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10,
+      letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8,
+    }}>{children}</div>
+  );
+}
+
+function SideInput({ label, value, onChange, placeholder, type = "text" }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>{label}</label>
+      <input
+        type={type} value={value} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        style={{
+          width: "100%", boxSizing: "border-box",
+          border: `1px solid ${focused ? T.borderFocus : T.border}`,
+          borderRadius: T.radiusSm, padding: "7px 10px",
+          fontSize: 12, color: T.text, background: T.surface,
+          outline: "none", fontFamily: "inherit", transition: "border-color 0.15s",
+        }}
+      />
+    </div>
+  );
+}
+
+// ── Intel Badge ───────────────────────────────────────────────────────────────
+function IntelBadge({ intel, onClear }) {
+  if (!intel) return null;
+  return (
+    <div style={{
+      background: T.violetBg, border: `1px solid ${T.violetBorder}`,
+      borderRadius: T.radiusSm, padding: "8px 10px",
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
     }}>
-      {children}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: T.violet }}>
+          ✓ {intel.angles.length} angles loaded
+        </div>
+        {intel.naicsLabel && (
+          <div style={{ fontSize: 11, color: T.violet, opacity: 0.7, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {intel.naicsLabel}
+          </div>
+        )}
+      </div>
+      <button onClick={onClear} style={{
+        background: "none", border: "none", color: T.violet, cursor: "pointer",
+        fontSize: 14, padding: "0 2px", opacity: 0.6, flexShrink: 0,
+      }}>✕</button>
     </div>
   );
 }
 
 // ── Email Card ────────────────────────────────────────────────────────────────
-function EmailCard({ email }) {
+function EmailCard({ email, idx }) {
   const [expanded, setExpanded] = useState(true);
-  const cfg = ANGLE_COLORS[email.angle] || { color: T.accent, bg: T.accentBg, border: T.accentBorder };
+  const colors = [
+    { color: T.violet, bg: T.violetBg, border: T.violetBorder },
+    { color: T.amber,  bg: T.amberBg,  border: T.amberBorder  },
+    { color: T.green,  bg: T.greenBg,  border: T.greenBorder  },
+    { color: T.red,    bg: T.redBg,    border: T.redBorder    },
+    { color: T.accent, bg: T.accentBg, border: T.accentBorder },
+  ];
+  const cfg = colors[idx % colors.length];
   const fullText = `Subject: ${email.subject}\n\n${email.body}`;
 
   return (
@@ -173,7 +240,7 @@ function EmailCard({ email }) {
           <span style={{
             background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
             borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700,
-            letterSpacing: "0.05em", whiteSpace: "nowrap", flexShrink: 0,
+            letterSpacing: "0.04em", whiteSpace: "nowrap", flexShrink: 0,
           }}>
             {email.angle}
           </span>
@@ -187,15 +254,23 @@ function EmailCard({ email }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0, marginLeft: 12 }}>
           <CopyButton text={fullText} label="Copy" />
           <span style={{
-            fontSize: 14, color: T.textMuted,
-            transform: expanded ? "rotate(180deg)" : "none",
-            transition: "transform 0.15s", display: "inline-block",
+            fontSize: 14, color: T.textMuted, display: "inline-block",
+            transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s",
           }}>▾</span>
         </div>
       </div>
 
       {expanded && (
         <div style={{ padding: "16px 18px" }}>
+          {email.hook_used && (
+            <div style={{
+              fontSize: 11, color: T.textMuted, marginBottom: 10, fontStyle: "italic",
+              padding: "5px 10px", background: T.bg, borderRadius: T.radiusSm,
+              borderLeft: `2px solid ${cfg.border}`,
+            }}>
+              <strong style={{ color: T.textSub }}>ProspectFold hook:</strong> {email.hook_used}
+            </div>
+          )}
           <div style={{
             background: T.bg, border: `1px solid ${T.border}`,
             borderRadius: T.radiusSm, padding: "14px 16px", marginBottom: 10,
@@ -219,132 +294,64 @@ function EmailCard({ email }) {
 function ResearchPanel({ research }) {
   const [open, setOpen] = useState(false);
   if (!research) return null;
-
   return (
     <div style={{ marginBottom: 16 }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          background: "none", border: `1px solid ${T.border}`,
-          borderRadius: T.radiusSm, padding: "6px 12px",
-          fontSize: 12, color: T.textSub, cursor: "pointer",
-          fontFamily: "inherit", fontWeight: 600,
-          display: "flex", alignItems: "center", gap: 6,
-          marginBottom: open ? 10 : 0,
-        }}
-      >
+      <button onClick={() => setOpen(o => !o)} style={{
+        background: "none", border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+        padding: "6px 12px", fontSize: 12, color: T.textSub, cursor: "pointer",
+        fontFamily: "inherit", fontWeight: 600, display: "flex", alignItems: "center", gap: 6,
+        marginBottom: open ? 10 : 0,
+      }}>
         <span style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", display: "inline-block" }}>▶</span>
         Company Intelligence
       </button>
-
       {open && (
-        <Card>
+        <div style={{
+          background: T.surface, border: `1px solid ${T.border}`,
+          borderRadius: T.radius, padding: "16px 18px", boxShadow: T.shadow,
+        }}>
           {research.company_overview && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Overview</FieldLabel>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Overview</div>
               <p style={{ margin: 0, fontSize: 13, color: T.text, lineHeight: 1.6 }}>{research.company_overview}</p>
-              {(research.size || research.stage) && (
-                <div style={{ marginTop: 8 }}>
-                  {research.size  && <Tag color={T.accent} bg={T.accentBg} border={T.accentBorder}>{research.size}</Tag>}
-                  {research.stage && <Tag color={T.violet} bg={T.violetBg} border={T.violetBorder}>{research.stage}</Tag>}
-                </div>
-              )}
             </div>
           )}
-
-          {research.tech_stack?.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Tech Stack</FieldLabel>
-              <div>{research.tech_stack.map((t, i) => <Tag key={i} color={T.green} bg={T.greenBg} border={T.greenBorder}>{t}</Tag>)}</div>
+          {research.signals_found?.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Signals Confirmed</div>
+              {research.signals_found.map((s, i) => (
+                <div key={i} style={{ fontSize: 12, color: T.text, padding: "3px 0 3px 10px", borderLeft: `2px solid ${T.greenBorder}`, marginBottom: 3 }}>{s}</div>
+              ))}
             </div>
           )}
-
           {research.recent_news?.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Recent News</FieldLabel>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Recent News</div>
               {research.recent_news.map((n, i) => (
-                <div key={i} style={{
-                  padding: "8px 10px", background: T.amberBg,
-                  border: `1px solid ${T.amberBorder}`, borderRadius: T.radiusSm, marginBottom: 6,
-                }}>
+                <div key={i} style={{ padding: "7px 10px", background: T.amberBg, border: `1px solid ${T.amberBorder}`, borderRadius: T.radiusSm, marginBottom: 5 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{n.headline}</div>
-                  {n.significance && <div style={{ fontSize: 12, color: T.textSub, marginTop: 2 }}>{n.significance}</div>}
-                  {n.date && <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>{n.date}</div>}
+                  {n.significance && <div style={{ fontSize: 12, color: T.textSub, marginTop: 1 }}>{n.significance}</div>}
+                  {n.date && <div style={{ fontSize: 11, color: T.textMuted, marginTop: 1 }}>{n.date}</div>}
                 </div>
               ))}
             </div>
           )}
-
-          {research.pain_points?.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <FieldLabel>Pain Points</FieldLabel>
-              {research.pain_points.map((p, i) => (
-                <div key={i} style={{
-                  fontSize: 12, color: T.text, padding: "4px 0 4px 10px",
-                  borderLeft: `2px solid ${T.redBorder}`, marginBottom: 4,
-                }}>{p}</div>
-              ))}
-            </div>
-          )}
-
-          {research.buying_signals?.length > 0 && (
-            <div style={{ marginBottom: research.culture_signals?.length ? 14 : 0 }}>
-              <FieldLabel>Buying Signals</FieldLabel>
-              {research.buying_signals.map((s, i) => (
-                <div key={i} style={{
-                  fontSize: 12, color: T.text, padding: "4px 0 4px 10px",
-                  borderLeft: `2px solid ${T.greenBorder}`, marginBottom: 4,
-                }}>{s}</div>
-              ))}
-            </div>
-          )}
-
-          {research.culture_signals?.length > 0 && (
+          {research.tech_stack?.length > 0 && (
             <div>
-              <FieldLabel>Culture Signals</FieldLabel>
-              {research.culture_signals.map((s, i) => (
-                <div key={i} style={{
-                  fontSize: 12, color: T.text, padding: "4px 0 4px 10px",
-                  borderLeft: `2px solid ${T.accentBorder}`, marginBottom: 4,
-                }}>{s}</div>
-              ))}
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>Tech Stack</div>
+              <div>{research.tech_stack.map((t, i) => (
+                <span key={i} style={{
+                  background: T.greenBg, color: T.green, border: `1px solid ${T.greenBorder}`,
+                  borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 500,
+                  display: "inline-block", margin: "2px 3px 2px 0",
+                }}>{t}</span>
+              ))}</div>
             </div>
           )}
-        </Card>
+        </div>
       )}
     </div>
   );
-}
-
-// ── Sidebar Input ─────────────────────────────────────────────────────────────
-function SideInput({ label, value, onChange, placeholder, type = "text" }) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>
-        {label}
-      </label>
-      <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          width: "100%", boxSizing: "border-box",
-          border: `1px solid ${focused ? T.borderFocus : T.border}`,
-          borderRadius: T.radiusSm, padding: "7px 10px",
-          fontSize: 12, color: T.text, background: T.surface,
-          outline: "none", fontFamily: "inherit", transition: "border-color 0.15s",
-        }}
-      />
-    </div>
-  );
-}
-
-function Divider() {
-  return <hr style={{ border: "none", borderTop: `1px solid ${T.border}`, margin: "16px 0" }} />;
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
@@ -352,11 +359,16 @@ export default function App() {
   const [apiKey,        setApiKey]        = useState(() => localStorage.getItem(LS_KEY_API)     || "");
   const [senderName,    setSenderName]    = useState(() => localStorage.getItem(LS_KEY_SENDER)  || "");
   const [senderProduct, setSenderProduct] = useState(() => localStorage.getItem(LS_KEY_PRODUCT) || FOXWORKS_PITCH);
-  const [companyName,   setCompanyName]   = useState("");
-  const [companyUrl,    setCompanyUrl]    = useState("");
-  const [contactName,   setContactName]   = useState("");
-  const [contactRole,   setContactRole]   = useState("");
-  const [emailGoal,     setEmailGoal]     = useState("cold_intro");
+  const [intelRaw,      setIntelRaw]      = useState(() => localStorage.getItem(LS_KEY_INTEL)   || "");
+  const [intelParsed,   setIntelParsed]   = useState(null);
+  const [showIntelPaste, setShowIntelPaste] = useState(false);
+
+  const [companyName,  setCompanyName]  = useState("");
+  const [companyUrl,   setCompanyUrl]   = useState("");
+  const [contactName,  setContactName]  = useState("");
+  const [contactRole,  setContactRole]  = useState("");
+  const [emailGoal,    setEmailGoal]    = useState("cold_intro");
+
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState(null);
   const [phase,    setPhase]    = useState("");
@@ -368,16 +380,21 @@ export default function App() {
   });
   const abortRef = useRef(null);
 
+  // Persist
   useEffect(() => { localStorage.setItem(LS_KEY_API,     apiKey);        }, [apiKey]);
   useEffect(() => { localStorage.setItem(LS_KEY_PRODUCT, senderProduct); }, [senderProduct]);
   useEffect(() => { localStorage.setItem(LS_KEY_SENDER,  senderName);    }, [senderName]);
+  useEffect(() => { localStorage.setItem(LS_KEY_INTEL,   intelRaw);      }, [intelRaw]);
   useEffect(() => { localStorage.setItem(LS_KEY_HISTORY, JSON.stringify(history)); }, [history]);
 
-  const stop = () => {
-    if (abortRef.current) abortRef.current.abort();
-    setLoading(false);
-    setPhase("");
-  };
+  // Auto-parse intel whenever raw text changes
+  useEffect(() => {
+    if (!intelRaw.trim()) { setIntelParsed(null); return; }
+    const parsed = parseIntel(intelRaw);
+    setIntelParsed(parsed);
+  }, [intelRaw]);
+
+  const stop = () => { if (abortRef.current) abortRef.current.abort(); setLoading(false); setPhase(""); };
 
   const run = useCallback(async () => {
     if (!companyName.trim()) { setError("Enter a company name."); return; }
@@ -393,33 +410,37 @@ export default function App() {
     setEmails(null);
     setPhase(`Researching ${companyName}...`);
 
-    // ── Phase 1: Web Search Research ─────────────────────────────────────────
+    // ── Phase 1: Company Research ─────────────────────────────────────────────
+    // If intel package loaded, use its signals to guide the search.
+    // Otherwise fall back to a generic company research pass.
     let researchData = null;
     try {
-      const researchPrompt = `You are a B2B sales intelligence researcher for Foxworks Studios, an AI engineering collective.
+      const signalsContext = intelParsed?.signals?.length
+        ? `\nSearch for evidence that this company matches any of these buying signals:\n${intelParsed.signals.map(s => `- ${s}`).join("\n")}`
+        : "";
 
-TARGET: ${companyName}${companyUrl ? `\nURL: ${companyUrl}` : ""}
+      const researchPrompt = `You are a B2B sales intelligence researcher for Foxworks Studios.
 
-Use web search to build a complete company intelligence dossier. Search for all of the following:
-1. Company overview — what they do, market position, key products/services
-2. Size and funding stage — headcount, funding rounds, investors, revenue signals
-3. Tech stack — job postings, engineering blog, GitHub repos, any tech mentions in press
-4. Recent news (last 6 months) — funding, launches, expansions, exec hires, layoffs, partnerships, press coverage
-5. Pain points — challenges mentioned in press, Glassdoor reviews, case studies, industry pressures
-6. Buying signals — evidence they are investing in tech, automation, or AI
+TARGET COMPANY: ${companyName}${companyUrl ? `\nWEBSITE: ${companyUrl}` : ""}
+${signalsContext}
 
-Return a JSON object with this exact structure:
+Use web search to find:
+1. Company overview (what they do, market position, size, funding stage)
+2. Tech stack visible in job postings, engineering blog, GitHub, or press
+3. Recent news last 6 months (funding, launches, exec changes, expansions, layoffs)
+4. Observable pain points from press, reviews, or case studies
+${intelParsed?.signals?.length ? "5. Evidence confirming or denying any of the buying signals listed above" : ""}
+
+Return this JSON structure:
 {
-  "company_overview": "2-3 sentence description of what they do and market position",
-  "size": "employee headcount estimate e.g. '50-200 employees'",
+  "company_overview": "2-3 sentence description",
+  "size": "headcount estimate",
   "stage": "startup | growth | enterprise | public | unknown",
-  "tech_stack": ["technology1", "technology2"],
-  "recent_news": [
-    { "headline": "string", "significance": "why this matters for a sales approach", "date": "approx date" }
-  ],
-  "pain_points": ["specific pain point observable from public data"],
-  "buying_signals": ["observable signal suggesting appetite for AI/automation investment"],
-  "culture_signals": ["team or culture observation from LinkedIn, press, or website"]
+  "tech_stack": ["tech1", "tech2"],
+  "recent_news": [{ "headline": string, "significance": string, "date": string }],
+  "pain_points": ["specific pain point from public evidence"],
+  "signals_found": ["confirmed buying signals from the ProspectFold intel that this company shows"],
+  "angle_fit": "1-2 sentences on which sales angle from our intel is the strongest fit for this specific company and why"
 }
 
 Return ONLY valid JSON. No preamble, no markdown fences.`;
@@ -448,70 +469,70 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
         researchData = extractJSON(text);
         if (researchData) {
           setResearch(researchData);
-          setPhase("Research complete — drafting emails...");
+          setPhase("Research complete — drafting emails from ProspectFold angles...");
         }
       }
     } catch (e) {
       if (e?.name === "AbortError") { setLoading(false); return; }
-      setPhase("Web research unavailable — drafting from training data...");
+      setPhase("Web research unavailable — drafting from intel package...");
       await new Promise(r => setTimeout(r, 600));
     }
 
     // ── Phase 2: Email Drafting ───────────────────────────────────────────────
     const goalLabel = EMAIL_GOALS.find(g => g.value === emailGoal)?.label || emailGoal;
 
-    const draftPrompt = `You are a world-class B2B copywriter working for Foxworks Studios, an AI engineering collective.
+    // Build the angles block — from ProspectFold intel if loaded, otherwise generic
+    const anglesBlock = intelParsed?.angles?.length
+      ? `SALES ANGLES (from ProspectFold intel — use these as the foundation for each email):
+${intelParsed.angles.map((a, i) => `
+ANGLE ${i + 1} — "${a.name}"
+Hook: ${a.hook}
+Hypothesis: ${a.hypothesis}`).join("\n")}
 
-COMPANY INTEL:
+Select the 3 angles most relevant to this specific company based on the research above. Write one email per selected angle.`
+      : `Write 3 emails using these angles:
+1. Pain Point Hook — lead with an observable pain point
+2. Recent News Hook — reference something specific that just happened
+3. Tech Stack Hook — open with a tech-specific observation`;
+
+    const intelContext = intelParsed
+      ? `\nINDUSTRY CONTEXT (ProspectFold intel — ${intelParsed.naicsLabel || "target vertical"}):
+Summary: ${intelParsed.summary}
+Red flags to avoid: ${intelParsed.red_flags?.slice(0, 3).join("; ") || "none"}\n`
+      : "";
+
+    const draftPrompt = `You are a world-class B2B copywriter for Foxworks Studios, an AI engineering collective.
+${intelContext}
+COMPANY RESEARCH:
 ${researchData ? JSON.stringify(researchData, null, 2) : `Company: ${companyName}${companyUrl ? `\nURL: ${companyUrl}` : ""}`}
 
-RECIPIENT:${contactName ? `\nName: ${contactName}` : " Not specified"}${contactRole ? `\nRole/Title: ${contactRole}` : ""}
+RECIPIENT:${contactName ? `\nName: ${contactName}` : " Not specified"}${contactRole ? `\nRole: ${contactRole}` : ""}
 
 OUR OFFERING:
 ${senderProduct}
 
 EMAIL GOAL: ${goalLabel}
-SENDER SIGNATURE: ${senderName || "[Your Name]"} — Foxworks Studios
+SENDER: ${senderName || "[Your Name]"} — Foxworks Studios
 
-Write 3 personalized outbound email variants, each using a different angle. Each email must feel handcrafted by someone who actually read about this company — not AI-generated.
-
-ANGLE 1 — "Pain Point Hook"
-Lead with a specific, observable pain point from the company research. Demonstrate you understand their operational reality before mentioning what you offer.
-
-ANGLE 2 — "Recent News Hook"
-Reference something specific that recently happened at this company (funding, product launch, exec hire, expansion, press mention). Connect that event to why you're reaching out now.
-
-ANGLE 3 — "Tech Stack Hook"
-Open with a specific observation about their engineering choices or technical decisions. Position what Foxworks builds as something that complements or extends their existing stack.
+${anglesBlock}
 
 EMAIL RULES (non-negotiable):
 - Max 120 words per body
-- First sentence must be specific to this company — no generic openers
-- Banned phrases: "I hope this finds you well", "I came across your company", "I wanted to reach out", "I'm writing to", "Hope you're doing well"
-- One clear, low-friction CTA at the end (15-minute call, a question to reply to, a specific ask)
-- Peer-to-peer register — you're a practitioner talking to another practitioner
-- Be specific: name technologies, metrics, events, team signals — avoid generic AI buzzwords
+- First sentence must be specific to ${companyName} — no generic openers
+- Banned: "I hope this finds you well", "I came across your company", "I wanted to reach out"
+- One clear, low-friction CTA (15-minute call, a reply question, etc.)
+- Peer-to-peer register — practitioner talking to practitioner
+- If ProspectFold hooks are provided, USE them verbatim or as the core value prop sentence, then personalize around them
 
-Return ONLY this JSON structure:
+Return ONLY this JSON:
 {
   "emails": [
     {
-      "angle": "Pain Point Hook",
-      "subject": "subject line (under 8 words, specific, no clickbait)",
+      "angle": "exact angle name from ProspectFold intel (or generic if no intel)",
+      "subject": "subject line under 8 words",
       "body": "full email body",
-      "why": "one sentence: why this angle is the right play for this specific company"
-    },
-    {
-      "angle": "Recent News Hook",
-      "subject": "subject line",
-      "body": "full email body",
-      "why": "one sentence explanation"
-    },
-    {
-      "angle": "Tech Stack Hook",
-      "subject": "subject line",
-      "body": "full email body",
-      "why": "one sentence explanation"
+      "hook_used": "the ProspectFold hook this email is built around (or null)",
+      "why": "one sentence: why this angle fits this specific company"
     }
   ]
 }
@@ -530,7 +551,7 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
         },
         body: JSON.stringify({
           model: "claude-opus-4-6",
-          max_tokens: 4000,
+          max_tokens: 5000,
           messages: [{ role: "user", content: draftPrompt }],
         }),
       });
@@ -546,9 +567,9 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
       if (!parsed?.emails?.length) throw new Error("Couldn't parse email output — try again.");
 
       const entry = {
-        id: Date.now(),
-        companyName, companyUrl, contactName, contactRole, emailGoal,
-        research: researchData, emails: parsed.emails, ts: Date.now(),
+        id: Date.now(), companyName, companyUrl, contactName, contactRole,
+        emailGoal, research: researchData, emails: parsed.emails,
+        intelLabel: intelParsed?.naicsLabel || null, ts: Date.now(),
       };
       setEmails(parsed.emails);
       setHistory(h => [entry, ...h].slice(0, 25));
@@ -559,36 +580,42 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
     } finally {
       setLoading(false);
     }
-  }, [apiKey, companyName, companyUrl, contactName, contactRole, emailGoal, senderProduct, senderName]);
+  }, [apiKey, companyName, companyUrl, contactName, contactRole, emailGoal, senderProduct, senderName, intelParsed]);
 
   const loadHistoryEntry = (entry) => {
     setCompanyName(entry.companyName || "");
-    setCompanyUrl(entry.companyUrl  || "");
+    setCompanyUrl(entry.companyUrl   || "");
     setContactName(entry.contactName || "");
     setContactRole(entry.contactRole || "");
-    setEmailGoal(entry.emailGoal   || "cold_intro");
+    setEmailGoal(entry.emailGoal     || "cold_intro");
     setResearch(entry.research || null);
-    setEmails(entry.emails   || null);
-    setError(null);
-    setPhase("");
+    setEmails(entry.emails     || null);
+    setError(null); setPhase("");
   };
 
-  const goalLabel = EMAIL_GOALS.find(g => g.value === emailGoal)?.label || emailGoal;
+  const goalLabel  = EMAIL_GOALS.find(g => g.value === emailGoal)?.label || emailGoal;
   const hasResults = !loading && (research || emails);
 
   return (
     <div style={{
-      minHeight: "100vh", height: "100vh", background: T.bg,
+      height: "100vh", background: T.bg,
       fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       display: "flex", flexDirection: "column", overflow: "hidden",
     }}>
-      {/* macOS title bar drag region */}
-      <div style={{ WebkitAppRegion: "drag", height: 38, flexShrink: 0, background: T.surface, borderBottom: `1px solid ${T.border}` }}>
-        <div style={{ height: "100%", display: "flex", alignItems: "center", paddingLeft: 80 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: T.textSub, letterSpacing: "-0.01em" }}>
-            <span style={{ color: T.accent }}>Email</span>Fold
-          </span>
-        </div>
+      {/* macOS title bar */}
+      <div style={{
+        WebkitAppRegion: "drag", height: 38, flexShrink: 0,
+        background: T.surface, borderBottom: `1px solid ${T.border}`,
+        display: "flex", alignItems: "center", paddingLeft: 80,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: T.textSub, letterSpacing: "-0.01em" }}>
+          <span style={{ color: T.accent }}>Email</span>Fold
+          {intelParsed?.naicsLabel && (
+            <span style={{ fontSize: 11, color: T.violet, fontWeight: 500, marginLeft: 8 }}>
+              · {intelParsed.naicsLabel}
+            </span>
+          )}
+        </span>
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
@@ -596,16 +623,14 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
         {/* ── LEFT SIDEBAR ───────────────────────────────────────────────────── */}
         <div style={{
           width: 300, flexShrink: 0, borderRight: `1px solid ${T.border}`,
-          background: T.surface, overflowY: "auto", padding: "20px 18px",
-          display: "flex", flexDirection: "column",
+          background: T.surface, overflowY: "auto", padding: "18px 18px",
         }}>
+
           {/* API Key */}
           <div style={{ marginBottom: 4 }}>
             <FieldLabel>Anthropic API Key</FieldLabel>
             <input
-              type="password"
-              value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
+              type="password" value={apiKey} onChange={e => setApiKey(e.target.value)}
               placeholder="sk-ant-..."
               style={{
                 width: "100%", boxSizing: "border-box",
@@ -618,6 +643,63 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
 
           <Divider />
 
+          {/* Intel Package */}
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <FieldLabel>ProspectFold Intel</FieldLabel>
+              {!intelParsed && (
+                <button
+                  onClick={() => setShowIntelPaste(p => !p)}
+                  style={{
+                    background: "none", border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                    padding: "2px 8px", fontSize: 11, color: T.textSub,
+                    cursor: "pointer", fontFamily: "inherit", fontWeight: 600,
+                  }}
+                >
+                  {showIntelPaste ? "Hide" : "+ Paste"}
+                </button>
+              )}
+            </div>
+
+            {intelParsed ? (
+              <IntelBadge intel={intelParsed} onClear={() => { setIntelRaw(""); setIntelParsed(null); }} />
+            ) : showIntelPaste ? (
+              <div>
+                <textarea
+                  value={intelRaw}
+                  onChange={e => setIntelRaw(e.target.value)}
+                  placeholder={'Paste the output from ProspectFold\'s "✉ → EmailFold" button, or paste the Markdown intel package...'}
+                  rows={6}
+                  style={{
+                    width: "100%", boxSizing: "border-box",
+                    border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+                    padding: "8px 10px", fontSize: 11, color: T.text, lineHeight: 1.5,
+                    background: T.bg, outline: "none", fontFamily: "inherit", resize: "vertical",
+                  }}
+                />
+                {intelRaw.trim() && !intelParsed && (
+                  <div style={{
+                    marginTop: 4, fontSize: 11, color: T.red,
+                    padding: "4px 8px", background: T.redBg, borderRadius: T.radiusSm,
+                  }}>
+                    Couldn't parse — paste the JSON from → EmailFold button or the Markdown report
+                  </div>
+                )}
+                <p style={{ fontSize: 10, color: T.textMuted, marginTop: 5, marginBottom: 0, lineHeight: 1.5 }}>
+                  In ProspectFold → generate intel → click <strong>✉ → EmailFold</strong>
+                </p>
+              </div>
+            ) : (
+              <p style={{ fontSize: 11, color: T.textMuted, margin: 0, lineHeight: 1.5 }}>
+                Load a ProspectFold intel package to use pre-crafted angles and buying signals.
+                Emails are more targeted when intel is loaded.
+              </p>
+            )}
+          </div>
+
+          <Divider />
+
+          {/* Target */}
           <FieldLabel>Target Company</FieldLabel>
           <SideInput label="Company Name *" value={companyName} onChange={setCompanyName} placeholder="Acme Corp" />
           <SideInput label="Website URL"    value={companyUrl}  onChange={setCompanyUrl}  placeholder="https://acmecorp.com" />
@@ -626,64 +708,44 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
 
           <FieldLabel>Contact (optional)</FieldLabel>
           <SideInput label="Name" value={contactName} onChange={setContactName} placeholder="Jane Smith" />
-          <SideInput label="Role" value={contactRole} onChange={setContactRole} placeholder="VP of Engineering" />
+          <SideInput label="Role" value={contactRole} onChange={setContactRole} placeholder="Owner / CEO" />
 
           <Divider />
 
           <FieldLabel>Email Config</FieldLabel>
-
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 10 }}>
             <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>Goal</label>
-            <select
-              value={emailGoal}
-              onChange={e => setEmailGoal(e.target.value)}
-              style={{
-                width: "100%", boxSizing: "border-box",
-                border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-                padding: "7px 10px", fontSize: 12, color: T.text,
-                background: T.surface, outline: "none", fontFamily: "inherit",
-              }}
-            >
+            <select value={emailGoal} onChange={e => setEmailGoal(e.target.value)} style={{
+              width: "100%", boxSizing: "border-box",
+              border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+              padding: "7px 10px", fontSize: 12, color: T.text,
+              background: T.surface, outline: "none", fontFamily: "inherit",
+            }}>
               {EMAIL_GOALS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
             </select>
           </div>
 
           <SideInput label="Your Name" value={senderName} onChange={setSenderName} placeholder="Josh Tseppich" />
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>
-              Your Offering
-            </label>
-            <textarea
-              value={senderProduct}
-              onChange={e => setSenderProduct(e.target.value)}
-              rows={6}
-              style={{
-                width: "100%", boxSizing: "border-box",
-                border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-                padding: "7px 10px", fontSize: 11, color: T.text, lineHeight: 1.5,
-                background: T.surface, outline: "none", fontFamily: "inherit", resize: "vertical",
-              }}
-            />
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>Your Offering</label>
+            <textarea value={senderProduct} onChange={e => setSenderProduct(e.target.value)} rows={5} style={{
+              width: "100%", boxSizing: "border-box",
+              border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
+              padding: "7px 10px", fontSize: 11, color: T.text, lineHeight: 1.5,
+              background: T.surface, outline: "none", fontFamily: "inherit", resize: "vertical",
+            }} />
           </div>
 
-          {/* Generate Button */}
-          <button
-            onClick={loading ? stop : run}
-            style={{
-              background:   loading ? T.redBg  : T.accent,
-              color:        loading ? T.red    : "#fff",
-              border:       loading ? `1px solid ${T.redBorder}` : "none",
-              borderRadius: T.radiusSm,
-              padding:      "10px 0",
-              fontSize:     13,
-              fontWeight:   700,
-              cursor:       "pointer",
-              fontFamily:   "inherit",
-              letterSpacing: "0.02em",
-              transition:   "background 0.15s",
-            }}
-          >
+          <button onClick={loading ? stop : run} style={{
+            background: loading ? T.redBg : T.accent,
+            color: loading ? T.red : "#fff",
+            border: loading ? `1px solid ${T.redBorder}` : "none",
+            borderRadius: T.radiusSm, padding: "10px 0",
+            fontSize: 13, fontWeight: 700, cursor: "pointer",
+            fontFamily: "inherit", letterSpacing: "0.02em", transition: "background 0.15s",
+            width: "100%",
+          }}>
             {loading ? "Stop" : "Generate Emails"}
           </button>
 
@@ -692,30 +754,27 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
               marginTop: 10, padding: "8px 12px",
               background: T.redBg, border: `1px solid ${T.redBorder}`,
               borderRadius: T.radiusSm, fontSize: 12, color: T.red,
-            }}>
-              {error}
-            </div>
+            }}>{error}</div>
           )}
 
           {/* History */}
           {history.length > 0 && (
-            <div style={{ marginTop: 24 }}>
+            <div style={{ marginTop: 22 }}>
               <FieldLabel>History</FieldLabel>
               {history.map(entry => (
                 <div
-                  key={entry.id}
-                  onClick={() => loadHistoryEntry(entry)}
+                  key={entry.id} onClick={() => loadHistoryEntry(entry)}
                   style={{
-                    padding: "7px 10px", borderRadius: T.radiusSm,
-                    cursor: "pointer", marginBottom: 4,
-                    border: `1px solid ${T.border}`, background: T.bg,
-                    transition: "background 0.1s",
+                    padding: "7px 10px", borderRadius: T.radiusSm, cursor: "pointer",
+                    marginBottom: 4, border: `1px solid ${T.border}`, background: T.bg,
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = T.accentBg}
                   onMouseLeave={e => e.currentTarget.style.background = T.bg}
                 >
                   <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{entry.companyName}</div>
-                  <div style={{ fontSize: 11, color: T.textMuted }}>{timeAgo(entry.ts)}</div>
+                  <div style={{ fontSize: 11, color: T.textMuted }}>
+                    {timeAgo(entry.ts)}{entry.intelLabel ? ` · ${entry.intelLabel}` : ""}
+                  </div>
                 </div>
               ))}
             </div>
@@ -724,7 +783,7 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
 
         {/* ── MAIN PANEL ─────────────────────────────────────────────────────── */}
         <div style={{ flex: 1, overflowY: "auto", padding: "28px 32px" }}>
-          {/* Loading state */}
+
           {loading && (
             <div style={{
               display: "flex", alignItems: "center", gap: 12,
@@ -732,13 +791,11 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
               borderRadius: T.radius, padding: "14px 18px", marginBottom: 24,
             }}>
               <div style={{
-                width: 16, height: 16,
-                border: `2px solid ${T.accent}`, borderTopColor: "transparent",
-                borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0,
+                width: 16, height: 16, border: `2px solid ${T.accent}`,
+                borderTopColor: "transparent", borderRadius: "50%",
+                animation: "spin 0.7s linear infinite", flexShrink: 0,
               }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: T.accent }}>
-                {phase || "Working..."}
-              </span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: T.accent }}>{phase || "Working..."}</span>
             </div>
           )}
 
@@ -746,39 +803,47 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
           {!loading && !research && !emails && (
             <div style={{
               display: "flex", flexDirection: "column", alignItems: "center",
-              justifyContent: "center", minHeight: 420, textAlign: "center",
-              color: T.textMuted,
+              justifyContent: "center", minHeight: 420, textAlign: "center", color: T.textMuted,
             }}>
               <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.4 }}>✉</div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: T.textSub, marginBottom: 6 }}>
-                Research-backed email drafts
+              <div style={{ fontSize: 17, fontWeight: 700, color: T.textSub, marginBottom: 8 }}>
+                {intelParsed
+                  ? `${intelParsed.angles.length} angles loaded from ProspectFold`
+                  : "Research-backed email drafts"}
               </div>
-              <div style={{ fontSize: 13, lineHeight: 1.6, maxWidth: 340 }}>
-                Enter a company name — EmailFold will search the web for intelligence,
-                then draft 3 personalized email variants tuned to different angles.
-              </div>
+              {intelParsed ? (
+                <div style={{ maxWidth: 380 }}>
+                  <div style={{ fontSize: 13, color: T.textSub, marginBottom: 12 }}>
+                    {intelParsed.naicsLabel && <strong>{intelParsed.naicsLabel} · </strong>}
+                    Enter a company name and generate — emails will be built from your ProspectFold angles.
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center" }}>
+                    {intelParsed.angles.map((a, i) => (
+                      <span key={i} style={{
+                        background: T.violetBg, color: T.violet, border: `1px solid ${T.violetBorder}`,
+                        borderRadius: 4, padding: "3px 9px", fontSize: 11, fontWeight: 600,
+                      }}>{a.name}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, lineHeight: 1.6, maxWidth: 340 }}>
+                  Load a ProspectFold intel package to use pre-crafted angles, or enter a company name and generate with generic angles.
+                </div>
+              )}
             </div>
           )}
 
           {/* Results */}
           {hasResults && (
             <>
-              {/* Company header */}
               <div style={{ marginBottom: 20 }}>
                 <h1 style={{ fontSize: 22, fontWeight: 800, color: T.text, margin: 0, letterSpacing: "-0.02em" }}>
                   {companyName}
                 </h1>
                 {companyUrl && (
-                  <a
-                    href={companyUrl}
-                    onClick={e => {
-                      e.preventDefault();
-                      const openFn = window.electronAPI?.openExternal;
-                      if (openFn) openFn(companyUrl);
-                      else window.open(companyUrl, "_blank");
-                    }}
-                    style={{ fontSize: 12, color: T.accent, textDecoration: "none" }}
-                  >
+                  <a href={companyUrl} onClick={e => { e.preventDefault(); const f = window.electronAPI?.openExternal; if (f) f(companyUrl); else window.open(companyUrl, "_blank"); }}
+                    style={{ fontSize: 12, color: T.accent, textDecoration: "none" }}>
                     {companyUrl}
                   </a>
                 )}
@@ -789,25 +854,36 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
                     {contactRole && <span>{contactRole}</span>}
                   </div>
                 )}
+                {intelParsed?.naicsLabel && (
+                  <div style={{ marginTop: 4 }}>
+                    <span style={{
+                      background: T.violetBg, color: T.violet, border: `1px solid ${T.violetBorder}`,
+                      borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600,
+                    }}>
+                      Intel: {intelParsed.naicsLabel}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Research accordion */}
               <ResearchPanel research={research} />
 
-              {/* Email drafts */}
               {emails && (
                 <div>
-                  <SectionHeader
-                    title={`Email Variants — ${goalLabel}`}
-                    accent={T.accent}
-                    action={
-                      <CopyButton
-                        text={emails.map(e => `--- ${e.angle} ---\nSubject: ${e.subject}\n\n${e.body}`).join("\n\n")}
-                        label="Copy all"
-                      />
-                    }
-                  />
-                  {emails.map((email, i) => <EmailCard key={i} email={email} />)}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <div style={{
+                      fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: T.accent,
+                      textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6,
+                    }}>
+                      <span style={{ display: "inline-block", width: 3, height: 14, background: T.accent, borderRadius: 2 }} />
+                      Email Variants — {goalLabel}
+                    </div>
+                    <CopyButton
+                      text={emails.map(e => `--- ${e.angle} ---\nSubject: ${e.subject}\n\n${e.body}`).join("\n\n")}
+                      label="Copy all"
+                    />
+                  </div>
+                  {emails.map((email, i) => <EmailCard key={i} email={email} idx={i} />)}
                 </div>
               )}
             </>
@@ -817,7 +893,6 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        * { box-sizing: border-box; }
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: ${T.border}; border-radius: 3px; }
