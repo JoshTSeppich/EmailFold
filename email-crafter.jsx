@@ -31,7 +31,7 @@ const T = {
   radiusSm:     6,
 };
 
-const FOXWORKS_PITCH = `Foxworks Studios is an AI engineering collective that builds custom AI automations, MCP server integrations, and autonomous agent workflows for B2B companies. We turn high-repetition ops workflows into AI-powered systems — without requiring clients to hire or expand an in-house engineering team. Typical engagements: AI-powered document processing, customer communication automation, CRM enrichment pipelines, and custom LLM tooling. Average engagement: 6–12 weeks, $25K–$80K.`;
+const FOXWORKS_PITCH = `Foxworks Studios builds MCP servers, custom AI agents, and developer tooling — scoped and shipped in days, not months. We connect frontier models to internal tools, databases, and APIs your team already uses. Typical builds: custom MCP servers that give AI structured access to internal systems, AI agents that live inside Slack or your existing stack, workflow automations that turn repetitive ops into autonomous pipelines, and CLIs for engineering teams. Value-priced against the outcome it creates, not hours. Most projects deploy within a week of scoping.`;
 
 const EMAIL_GOALS = [
   { value: "cold_intro",   label: "Cold Introduction" },
@@ -63,6 +63,7 @@ function parseIntel(text) {
         signals:              json.signals || [],
         qualifying_criteria:  json.qualifying_criteria || [],
         red_flags:            json.red_flags || [],
+        apollo_companies:     json.apollo_companies || [],
         _source:              "json",
       };
     }
@@ -359,9 +360,10 @@ export default function App() {
   const [apiKey,        setApiKey]        = useState(() => localStorage.getItem(LS_KEY_API)     || "");
   const [senderName,    setSenderName]    = useState(() => localStorage.getItem(LS_KEY_SENDER)  || "");
   const [senderProduct, setSenderProduct] = useState(() => localStorage.getItem(LS_KEY_PRODUCT) || FOXWORKS_PITCH);
-  const [intelRaw,      setIntelRaw]      = useState(() => localStorage.getItem(LS_KEY_INTEL)   || "");
-  const [intelParsed,   setIntelParsed]   = useState(null);
+  const [intelRaw,       setIntelRaw]       = useState(() => localStorage.getItem(LS_KEY_INTEL) || "");
+  const [intelParsed,    setIntelParsed]    = useState(null);
   const [showIntelPaste, setShowIntelPaste] = useState(false);
+  const [skipResearch,   setSkipResearch]   = useState(true);   // default: skip web research (saves cost)
 
   const [companyName,  setCompanyName]  = useState("");
   const [companyUrl,   setCompanyUrl]   = useState("");
@@ -408,30 +410,33 @@ export default function App() {
     setError(null);
     setResearch(null);
     setEmails(null);
-    setPhase(`Researching ${companyName}...`);
+    // Skip research if intel loaded + skipResearch toggled (saves API cost significantly)
+    const doResearch = !skipResearch || !intelParsed;
+    setPhase(doResearch ? `Researching ${companyName}...` : "Drafting emails from ProspectFold angles...");
 
-    // ── Phase 1: Company Research ─────────────────────────────────────────────
-    // If intel package loaded, use its signals to guide the search.
-    // Otherwise fall back to a generic company research pass.
+    // ── Phase 1: Company Research (optional) ──────────────────────────────────
+    // Skipped by default when intel is loaded — intel already provides all the context needed.
+    // Enable manually for company-specific personalization (costs ~$0.01–0.05 extra).
     let researchData = null;
-    try {
-      const signalsContext = intelParsed?.signals?.length
-        ? `\nSearch for evidence that this company matches any of these buying signals:\n${intelParsed.signals.map(s => `- ${s}`).join("\n")}`
-        : "";
+    if (doResearch) {
+      try {
+        const signalsContext = intelParsed?.signals?.length
+          ? `\nSearch for evidence that this company matches any of these buying signals:\n${intelParsed.signals.map(s => `- ${s}`).join("\n")}`
+          : "";
 
-      const researchPrompt = `You are a B2B sales intelligence researcher for Foxworks Studios.
+        const researchPrompt = `You are a B2B sales intelligence researcher.
 
 TARGET COMPANY: ${companyName}${companyUrl ? `\nWEBSITE: ${companyUrl}` : ""}
 ${signalsContext}
 
 Use web search to find:
 1. Company overview (what they do, market position, size, funding stage)
-2. Tech stack visible in job postings, engineering blog, GitHub, or press
-3. Recent news last 6 months (funding, launches, exec changes, expansions, layoffs)
+2. Tech stack from job postings, engineering blog, GitHub, or press
+3. Recent news last 6 months (funding, launches, exec changes, expansions)
 4. Observable pain points from press, reviews, or case studies
-${intelParsed?.signals?.length ? "5. Evidence confirming or denying any of the buying signals listed above" : ""}
+${intelParsed?.signals?.length ? "5. Evidence confirming any of the buying signals listed above" : ""}
 
-Return this JSON structure:
+Return this JSON:
 {
   "company_overview": "2-3 sentence description",
   "size": "headcount estimate",
@@ -439,43 +444,43 @@ Return this JSON structure:
   "tech_stack": ["tech1", "tech2"],
   "recent_news": [{ "headline": string, "significance": string, "date": string }],
   "pain_points": ["specific pain point from public evidence"],
-  "signals_found": ["confirmed buying signals from the ProspectFold intel that this company shows"],
-  "angle_fit": "1-2 sentences on which sales angle from our intel is the strongest fit for this specific company and why"
+  "signals_found": ["confirmed buying signals this company shows"]
 }
 
 Return ONLY valid JSON. No preamble, no markdown fences.`;
 
-      const r1 = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-beta": "web-search-2025-03-05",
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
-        body: JSON.stringify({
-          model: "claude-opus-4-6",
-          max_tokens: 4000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          messages: [{ role: "user", content: researchPrompt }],
-        }),
-      });
+        const r1 = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "web-search-2025-03-05",
+            "anthropic-dangerous-direct-browser-access": "true",
+          },
+          body: JSON.stringify({
+            model: "claude-haiku-3-5-20241022",
+            max_tokens: 2000,
+            tools: [{ type: "web_search_20250305", name: "web_search" }],
+            messages: [{ role: "user", content: researchPrompt }],
+          }),
+        });
 
-      if (r1.ok) {
-        const d1 = await r1.json();
-        const text = d1.content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
-        researchData = extractJSON(text);
-        if (researchData) {
-          setResearch(researchData);
-          setPhase("Research complete — drafting emails from ProspectFold angles...");
+        if (r1.ok) {
+          const d1 = await r1.json();
+          const text = d1.content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
+          researchData = extractJSON(text);
+          if (researchData) {
+            setResearch(researchData);
+            setPhase("Research done — drafting emails...");
+          }
         }
+      } catch (e) {
+        if (e?.name === "AbortError") { setLoading(false); return; }
+        setPhase("Research unavailable — drafting from intel package...");
+        await new Promise(r => setTimeout(r, 400));
       }
-    } catch (e) {
-      if (e?.name === "AbortError") { setLoading(false); return; }
-      setPhase("Web research unavailable — drafting from intel package...");
-      await new Promise(r => setTimeout(r, 600));
     }
 
     // ── Phase 2: Email Drafting ───────────────────────────────────────────────
@@ -550,8 +555,8 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: "claude-opus-4-6",
-          max_tokens: 5000,
+          model: "claude-haiku-3-5-20241022",
+          max_tokens: 2500,
           messages: [{ role: "user", content: draftPrompt }],
         }),
       });
@@ -725,6 +730,20 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
             </select>
           </div>
 
+          {/* Research toggle */}
+          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              id="skipResearch"
+              checked={skipResearch}
+              onChange={e => setSkipResearch(e.target.checked)}
+              style={{ cursor: "pointer" }}
+            />
+            <label htmlFor="skipResearch" style={{ fontSize: 11, color: T.textSub, cursor: "pointer", lineHeight: 1.4 }}>
+              Skip web research {intelParsed ? <span style={{ color: T.green }}>(recommended — intel loaded)</span> : <span style={{ color: T.amber }}>(faster, costs less)</span>}
+            </label>
+          </div>
+
           <SideInput label="Your Name" value={senderName} onChange={setSenderName} placeholder="Josh Tseppich" />
 
           <div style={{ marginBottom: 14 }}>
@@ -799,8 +818,61 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
             </div>
           )}
 
+          {/* Company picker — shown when Apollo companies are imported from ProspectFold */}
+          {!loading && !emails && intelParsed?.apollo_companies?.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10,
+              }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: T.amber,
+                  textTransform: "uppercase", display: "flex", alignItems: "center", gap: 6,
+                }}>
+                  <span style={{ display: "inline-block", width: 3, height: 14, background: T.amber, borderRadius: 2 }} />
+                  Apollo Company Queue — {intelParsed.apollo_companies.length} companies
+                </div>
+                <span style={{ fontSize: 11, color: T.textMuted }}>Click to auto-fill target</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {intelParsed.apollo_companies.map((co, i) => (
+                  <div
+                    key={i}
+                    onClick={() => {
+                      setCompanyName(co.name || "");
+                      setCompanyUrl(co.website_url || "");
+                      setEmails(null);
+                      setResearch(null);
+                      setError(null);
+                    }}
+                    style={{
+                      background: T.surface, border: `1px solid ${T.border}`,
+                      borderRadius: T.radiusSm, padding: "10px 12px",
+                      cursor: "pointer", transition: "border-color 0.15s, background 0.1s",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = T.amber; e.currentTarget.style.background = T.amberBg; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.surface; }}
+                  >
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {co.name}
+                    </div>
+                    {co.website_url && (
+                      <div style={{ fontSize: 11, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {co.website_url.replace(/^https?:\/\//, "")}
+                      </div>
+                    )}
+                    {(co.industry || co.num_employees) && (
+                      <div style={{ fontSize: 10, color: T.textMuted, marginTop: 3 }}>
+                        {[co.industry, co.num_employees ? `${co.num_employees} emp.` : null].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Empty state */}
-          {!loading && !research && !emails && (
+          {!loading && !research && !emails && !(intelParsed?.apollo_companies?.length) && (
             <div style={{
               display: "flex", flexDirection: "column", alignItems: "center",
               justifyContent: "center", minHeight: 420, textAlign: "center", color: T.textMuted,
