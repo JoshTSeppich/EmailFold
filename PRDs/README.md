@@ -27,6 +27,12 @@
 | [PRD-16](./PRD-16-sequence-outbox-view.md) | Sequence Outbox View | P1 | EventFold | PRD-15, PRD-03 |
 | [PRD-17](./PRD-17-sequence-automation.md) | Sequence Automation (auto-stop, auto-advance) | **P0** | EventFold | PRD-15, PRD-12 |
 | [PRD-18](./PRD-18-sequence-analytics.md) | Sequence Analytics | P2 | EventFold | PRD-15, PRD-07 |
+| **— Person Intelligence Cluster —** | | | | |
+| [PRD-19](./PRD-19-trigger-event-engine.md) | Trigger Event Engine: The Right Moment Layer | P1 | ProspectFold | PRD-10 |
+| [PRD-20](./PRD-20-job-posting-intelligence.md) | Job Posting Intelligence: Organizational X-Ray | P1 | ProspectFold | PRD-10 |
+| [PRD-21](./PRD-21-champion-vs-buyer-mapping.md) | Champion vs. Buyer Mapping | P1 | ProspectFold + EventFold | PRD-10, PRD-15 |
+| [PRD-22](./PRD-22-person-signal-scoring.md) | Person Signal Scoring: The Composite Fit Model | P1 | ProspectFold + EmailFold | PRD-10, PRD-19, PRD-20 |
+| [PRD-23](./PRD-23-three-signal-framework.md) | The Three-Signal Framework: Philosophy & Architecture | **READ SECOND** | All teams | — |
 
 > **⚠ Architecture update:** PRD-09 supersedes the clipboard transport described in PRD-01 and PRD-02. Data contracts and aggregates in PRD-01/02 remain valid; the **transport layer changes from clipboard → local HTTP API**. No user clipboard interaction required.
 
@@ -40,7 +46,12 @@
    - Phase 0: Haiku pre-qualification (PRD-04, PRD-08)
    - Phase 1: Haiku web scan (PRD-04)
    - Phase 2: Opus synthesis — ICP score, angles (PRD-04 Quick/Deep modes)
-   - Phase 3: Apollo people search + Haiku person enrichment (PRD-10)
+   - Phase 3a: Apollo people search (structural candidates) (PRD-10 v2.0)
+   - Phase 3b: Trigger event detection — funding, new hires, headcount (PRD-19) [concurrent]
+   - Phase 3c: Job posting intelligence — org pain, tech stack (PRD-20) [concurrent]
+   - Phase 3d: Psychological signal search — posts, talks, GitHub (PRD-22) [concurrent]
+   - Phase 3e: Champion vs. buyer classification (PRD-21) [concurrent]
+   - Phase 3f: Three-signal score synthesis → email_modifier_prompt (PRD-22)
    - Output: POSTs directly to EventFold /api/intel (PRD-09) — NO clipboard
 
         ↓ PRD-01: intel bridge
@@ -112,6 +123,16 @@ Close the feedback loop. The system learns and improves.
 19. **PRD-18** — Sequence analytics (step reply rates, Lazarus rate, angle × sequence performance)
 20. **PRD-04** — Phase 0 batch pre-qual + NAICS angle cache + Quick Refill mode
 
+### Phase 5 — The Right Person (Month 5)
+The person intelligence cluster. Transforms "find a VP Engineering" into "find Jane Smith, who posted about this problem last week, just got promoted, and whose team is actively hiring for the exact role that signals the pain."
+
+21. **PRD-23** — Read the Three-Signal Framework first (philosophy + architecture)
+22. **PRD-10 v2.0** — Updated Phase 3 coordinator (now covers 6 concurrent sub-phases)
+23. **PRD-19** — Trigger Event Engine (funding rounds, new hires, headcount spikes)
+24. **PRD-20** — Job Posting Intelligence (org pain + tech stack from job descriptions)
+25. **PRD-21** — Champion vs. Buyer Mapping (two contacts, sequencing strategy)
+26. **PRD-22** — Person Signal Scoring (composite three-signal model + email_modifier_prompt)
+
 ---
 
 ## Key Technical Decisions
@@ -125,6 +146,9 @@ Close the feedback loop. The system learns and improves.
 | Task creation on send | Direct in `mark_email_sent` command | `EmailSent` event lacks contact/company IDs; Tauri command has full AppState access |
 | Phase 1 model | Switch to `claude-haiku-3-5` | Web search + format = no reasoning needed; Haiku is identical quality, 11× cheaper |
 | Parallel queue | Sliding window, concurrency 3 | Balances Anthropic rate limits vs throughput; configurable per user plan |
+| Person targeting | Three-Signal model (Structural + Situational + Psychological) | Title alone predicts 2-3% reply rate; three-signal scoring targets 10-15%+ |
+| Phase 3 execution | 6 sub-phases run concurrently per company | Max latency = slowest sub-phase (~4s), not sum (~18s); parallel with other companies |
+| Contact strategy | Champion first, Economic Buyer second | Internal advocacy beats cold buyer outreach by ~10:1; PRD-21 automates the split |
 
 ---
 
@@ -132,7 +156,7 @@ Close the feedback loop. The system learns and improves.
 
 **Start with [PRD-00](./PRD-00-integration-guide.md)** — it consolidates the full HTTP API spec, all 29 IPC commands, complete Tauri event catalog, all new Interaction fields, projection list, and an implementation checklist. Read it before any individual PRD.
 
-All EventFold changes are described in PRDs 01–18.
+All EventFold changes are described in PRDs 01–23. Person intelligence (PRDs 19–23) primarily affects ProspectFold and EmailFold; EventFold changes are limited to contact storage extensions (PRD-21) and reply-rate tracking by signal type (PRD-22/18).
 
 **Critical files identified:**
 - `src/domain/interaction.rs` — extend for PRD-02 (email fields) + PRD-15 (sequence fields)
