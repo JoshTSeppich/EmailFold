@@ -363,7 +363,7 @@ export default function App() {
   const [intelRaw,       setIntelRaw]       = useState(() => localStorage.getItem(LS_KEY_INTEL) || "");
   const [intelParsed,    setIntelParsed]    = useState(null);
   const [showIntelPaste, setShowIntelPaste] = useState(false);
-  const [skipResearch,   setSkipResearch]   = useState(true);   // default: skip web research (saves cost)
+  const [editingPitch,   setEditingPitch]   = useState(false);
 
   const [companyName,  setCompanyName]  = useState("");
   const [companyUrl,   setCompanyUrl]   = useState("");
@@ -410,77 +410,64 @@ export default function App() {
     setError(null);
     setResearch(null);
     setEmails(null);
-    // Skip research if intel loaded + skipResearch toggled (saves API cost significantly)
-    const doResearch = !skipResearch || !intelParsed;
-    setPhase(doResearch ? `Researching ${companyName}...` : "Drafting emails from ProspectFold angles...");
+    setPhase(`Scanning ${companyName}...`);
 
-    // ── Phase 1: Company Research (optional) ──────────────────────────────────
-    // Skipped by default when intel is loaded — intel already provides all the context needed.
-    // Enable manually for company-specific personalization (costs ~$0.01–0.05 extra).
+    // ── Phase 1: Lightweight company scan (always runs) ───────────────────────
+    // Focused and cheap (~$0.003): just enough company-specific signal to make
+    // the emails feel personal rather than industry-template. Not a full research
+    // pass — the ProspectFold intel already handles the vertical context.
     let researchData = null;
-    if (doResearch) {
-      try {
-        const signalsContext = intelParsed?.signals?.length
-          ? `\nSearch for evidence that this company matches any of these buying signals:\n${intelParsed.signals.map(s => `- ${s}`).join("\n")}`
-          : "";
+    try {
+      const researchPrompt = `You are a sales researcher. Search the web for "${companyName}"${companyUrl ? ` (${companyUrl})` : ""} and return a tight company snapshot.
 
-        const researchPrompt = `You are a B2B sales intelligence researcher.
+Find only:
+1. What they do in 1-2 sentences
+2. Approximate headcount and stage (startup/growth/enterprise)
+3. Any news from the last 90 days (funding, launches, exec hire, expansion) — skip if none
+4. Their primary tech stack if visible in job posts or press
 
-TARGET COMPANY: ${companyName}${companyUrl ? `\nWEBSITE: ${companyUrl}` : ""}
-${signalsContext}
-
-Use web search to find:
-1. Company overview (what they do, market position, size, funding stage)
-2. Tech stack from job postings, engineering blog, GitHub, or press
-3. Recent news last 6 months (funding, launches, exec changes, expansions)
-4. Observable pain points from press, reviews, or case studies
-${intelParsed?.signals?.length ? "5. Evidence confirming any of the buying signals listed above" : ""}
-
-Return this JSON:
+Return JSON only:
 {
-  "company_overview": "2-3 sentence description",
-  "size": "headcount estimate",
+  "company_overview": "1-2 sentence description",
+  "size": "headcount estimate or unknown",
   "stage": "startup | growth | enterprise | public | unknown",
-  "tech_stack": ["tech1", "tech2"],
+  "tech_stack": ["tech1"],
   "recent_news": [{ "headline": string, "significance": string, "date": string }],
-  "pain_points": ["specific pain point from public evidence"],
-  "signals_found": ["confirmed buying signals this company shows"]
+  "signals_found": []
 }
 
 Return ONLY valid JSON. No preamble, no markdown fences.`;
 
-        const r1 = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta": "web-search-2025-03-05",
-            "anthropic-dangerous-direct-browser-access": "true",
-          },
-          body: JSON.stringify({
-            model: "claude-haiku-3-5-20241022",
-            max_tokens: 2000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            messages: [{ role: "user", content: researchPrompt }],
-          }),
-        });
+      const r1 = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "web-search-2025-03-05",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-3-5-20241022",
+          max_tokens: 1000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          messages: [{ role: "user", content: researchPrompt }],
+        }),
+      });
 
-        if (r1.ok) {
-          const d1 = await r1.json();
-          const text = d1.content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
-          researchData = extractJSON(text);
-          if (researchData) {
-            setResearch(researchData);
-            setPhase("Research done — drafting emails...");
-          }
+      if (r1.ok) {
+        const d1 = await r1.json();
+        const text = d1.content?.filter(b => b.type === "text").map(b => b.text).join("") || "";
+        researchData = extractJSON(text);
+        if (researchData) {
+          setResearch(researchData);
+          setPhase("Drafting emails...");
         }
-      } catch (e) {
-        if (e?.name === "AbortError") { setLoading(false); return; }
-        setPhase("Research unavailable — drafting from intel package...");
-        await new Promise(r => setTimeout(r, 400));
       }
+    } catch (e) {
+      if (e?.name === "AbortError") { setLoading(false); return; }
+      // Research fail is non-fatal — draft from intel alone
     }
 
     // ── Phase 2: Email Drafting ───────────────────────────────────────────────
@@ -555,7 +542,7 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: "claude-haiku-3-5-20241022",
+          model: "claude-sonnet-4-5-20241022",
           max_tokens: 2500,
           messages: [{ role: "user", content: draftPrompt }],
         }),
@@ -730,30 +717,41 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
             </select>
           </div>
 
-          {/* Research toggle */}
-          <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              id="skipResearch"
-              checked={skipResearch}
-              onChange={e => setSkipResearch(e.target.checked)}
-              style={{ cursor: "pointer" }}
-            />
-            <label htmlFor="skipResearch" style={{ fontSize: 11, color: T.textSub, cursor: "pointer", lineHeight: 1.4 }}>
-              Skip web research {intelParsed ? <span style={{ color: T.green }}>(recommended — intel loaded)</span> : <span style={{ color: T.amber }}>(faster, costs less)</span>}
-            </label>
-          </div>
-
           <SideInput label="Your Name" value={senderName} onChange={setSenderName} placeholder="Josh Tseppich" />
 
           <div style={{ marginBottom: 14 }}>
-            <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: T.textSub, marginBottom: 4 }}>Your Offering</label>
-            <textarea value={senderProduct} onChange={e => setSenderProduct(e.target.value)} rows={5} style={{
-              width: "100%", boxSizing: "border-box",
-              border: `1px solid ${T.border}`, borderRadius: T.radiusSm,
-              padding: "7px 10px", fontSize: 11, color: T.text, lineHeight: 1.5,
-              background: T.surface, outline: "none", fontFamily: "inherit", resize: "vertical",
-            }} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 600, color: T.textSub }}>Offering</label>
+              <button
+                onClick={() => setEditingPitch(e => !e)}
+                style={{
+                  background: "none", border: "none", fontSize: 11,
+                  color: editingPitch ? T.red : T.textMuted,
+                  cursor: "pointer", fontFamily: "inherit", padding: 0,
+                }}
+              >
+                {editingPitch ? "Lock" : "Edit"}
+              </button>
+            </div>
+            {editingPitch ? (
+              <textarea value={senderProduct} onChange={e => setSenderProduct(e.target.value)} rows={5} style={{
+                width: "100%", boxSizing: "border-box",
+                border: `1px solid ${T.borderFocus}`, borderRadius: T.radiusSm,
+                padding: "7px 10px", fontSize: 11, color: T.text, lineHeight: 1.5,
+                background: T.surface, outline: "none", fontFamily: "inherit", resize: "vertical",
+              }} />
+            ) : (
+              <div style={{
+                fontSize: 11, color: T.textMuted, lineHeight: 1.55,
+                background: T.bg, borderRadius: T.radiusSm,
+                padding: "7px 10px", border: `1px solid ${T.border}`,
+                maxHeight: 80, overflow: "hidden",
+                maskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
+                WebkitMaskImage: "linear-gradient(to bottom, black 60%, transparent 100%)",
+              }}>
+                {senderProduct}
+              </div>
+            )}
           </div>
 
           <button onClick={loading ? stop : run} style={{
@@ -818,8 +816,8 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
             </div>
           )}
 
-          {/* Company picker — shown when Apollo companies are imported from ProspectFold */}
-          {!loading && !emails && intelParsed?.apollo_companies?.length > 0 && (
+          {/* Company picker — persists above results so you can queue through companies */}
+          {!loading && intelParsed?.apollo_companies?.length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <div style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10,
@@ -872,7 +870,7 @@ Return ONLY valid JSON. No preamble, no markdown fences.`;
           )}
 
           {/* Empty state */}
-          {!loading && !research && !emails && !(intelParsed?.apollo_companies?.length) && (
+          {!loading && !research && !emails && !intelParsed?.apollo_companies?.length && (
             <div style={{
               display: "flex", flexDirection: "column", alignItems: "center",
               justifyContent: "center", minHeight: 420, textAlign: "center", color: T.textMuted,
