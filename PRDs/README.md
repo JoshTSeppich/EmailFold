@@ -19,6 +19,9 @@
 | [PRD-09](./PRD-09-local-api-connectivity.md) | Local HTTP API: Direct App-to-App Connectivity | **P0** | All three apps | — |
 | [PRD-10](./PRD-10-contact-person-research.md) | Contact & Person Research: Finding THE Person | **P0** | ProspectFold + EmailFold | PRD-09 |
 | [PRD-11](./PRD-11-auto-pipeline.md) | The Auto Pipeline: Zero-Click Prospecting | P1 | All three apps | PRD-09 + PRD-10 |
+| [PRD-12](./PRD-12-reply-drafting.md) | Reply Assist: Drafting the Conversation Continuation | **P0** | EmailFold + EventFold | PRD-02, PRD-03 |
+| [PRD-13](./PRD-13-linkedin-variant.md) | LinkedIn Variant: Second Channel, Same Research | P1 | EmailFold | PRD-10 |
+| [PRD-14](./PRD-14-sequence-builder.md) | Sequence Builder: Follow-ups Where Deals Close | **P0** | EmailFold + EventFold | PRD-02, PRD-09 |
 
 > **⚠ Architecture update:** PRD-09 supersedes the clipboard transport described in PRD-01 and PRD-02. Data contracts and aggregates in PRD-01/02 remain valid; the **transport layer changes from clipboard → local HTTP API**. No user clipboard interaction required.
 
