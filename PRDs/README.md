@@ -21,7 +21,11 @@
 | [PRD-11](./PRD-11-auto-pipeline.md) | The Auto Pipeline: Zero-Click Prospecting | P1 | All three apps | PRD-09 + PRD-10 |
 | [PRD-12](./PRD-12-reply-drafting.md) | Reply Assist: Drafting the Conversation Continuation | **P0** | EmailFold + EventFold | PRD-02, PRD-03 |
 | [PRD-13](./PRD-13-linkedin-variant.md) | LinkedIn Variant: Second Channel, Same Research | P1 | EmailFold | PRD-10 |
-| [PRD-14](./PRD-14-sequence-builder.md) | Sequence Builder: Follow-ups Where Deals Close | **P0** | EmailFold + EventFold | PRD-02, PRD-09 |
+| [PRD-14](./PRD-14-sequence-generation-engine.md) | Sequence Generation Engine (EmailFold) | **P0** | EmailFold | PRD-10, PRD-09 |
+| [PRD-15](./PRD-15-sequence-data-model.md) | Sequence Data Model & Storage (EventFold) | **P0** | EventFold | PRD-02, PRD-09 |
+| [PRD-16](./PRD-16-sequence-outbox-view.md) | Sequence Outbox View | P1 | EventFold | PRD-15, PRD-03 |
+| [PRD-17](./PRD-17-sequence-automation.md) | Sequence Automation (auto-stop, auto-advance) | **P0** | EventFold | PRD-15, PRD-12 |
+| [PRD-18](./PRD-18-sequence-analytics.md) | Sequence Analytics | P2 | EventFold | PRD-15, PRD-07 |
 
 > **⚠ Architecture update:** PRD-09 supersedes the clipboard transport described in PRD-01 and PRD-02. Data contracts and aggregates in PRD-01/02 remain valid; the **transport layer changes from clipboard → local HTTP API**. No user clipboard interaction required.
 
@@ -89,12 +93,23 @@ The CRM becomes the daily command center. No clipboard anywhere.
 9. **PRD-08** — EmailFold parallel queue (concurrency 3)
 10. **PRD-05** — Intel history + stale intel indicator
 
-### Phase 3 — The Auto Pipeline (Month 3)
-One click → full Outbox. EventFold orchestrates everything.
+### Phase 3 — Sequences & Auto Pipeline (Month 3)
+Full conversation arc. One click → full Outbox with 4-step sequences ready.
 
-11. **PRD-11** — Auto pipeline: EventFold triggers ProspectFold + EmailFold jobs end-to-end
-12. **PRD-07** — Prospecting metrics dashboard (funnel, angle performance, NAICS rates)
-13. **PRD-04** — Phase 0 batch pre-qual + NAICS angle cache + Quick Refill mode
+11. **PRD-14** — Sequence generation engine in EmailFold (Phase 2b, Sonnet, 4-step output)
+12. **PRD-15** — Sequence data model in EventFold (Interaction extensions, IPC commands, SequenceIndex projection)
+13. **PRD-17** — Sequence automation (auto-stop on reply, auto-advance on send, per-step Tasks)
+14. **PRD-16** — Sequence Outbox view (Sequences tab, ●●○○ indicators, due-today banner)
+15. **PRD-11** — Auto pipeline: EventFold triggers ProspectFold + EmailFold end-to-end
+16. **PRD-12** — Reply Assist (in EmailFold + inline in Outbox)
+17. **PRD-13** — LinkedIn variant (one Haiku call, woven into sequence arc)
+
+### Phase 4 — Intelligence (Month 4)
+Close the feedback loop. The system learns and improves.
+
+18. **PRD-07** — Prospecting metrics dashboard (funnel, angle performance, NAICS rates)
+19. **PRD-18** — Sequence analytics (step reply rates, Lazarus rate, angle × sequence performance)
+20. **PRD-04** — Phase 0 batch pre-qual + NAICS angle cache + Quick Refill mode
 
 ---
 
