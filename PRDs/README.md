@@ -8,6 +8,7 @@
 
 | PRD | Title | Priority | Affects | Depends On |
 |---|---|---|---|---|
+| [PRD-00](./PRD-00-integration-guide.md) | **Integration Guide & Technical Design Specification** | **READ FIRST** | All three apps | — |
 | [PRD-01](./PRD-01-prospectfold-intel-import.md) | ProspectFold → EventFold Intel Import Bridge | P0 | EventFold | — |
 | [PRD-02](./PRD-02-emailfold-crm-bridge.md) | EmailFold → EventFold Email Draft Persistence | P0 | EventFold + EmailFold | — |
 | [PRD-03](./PRD-03-outbox-view.md) | Outbox View: Daily Send Command Center | P1 | EventFold | PRD-02 |
@@ -117,7 +118,7 @@ Close the feedback loop. The system learns and improves.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Inter-app bridge | System clipboard with typed JSON discriminators | Already proven: `__prospect_intel_v2` → `ApolloSearch.tsx`. Zero infrastructure. |
+| Inter-app bridge | Local HTTP API (axum, 127.0.0.1:7777, bearer token auth) | Invisible to user, offline-queued, no clipboard choreography. Discovery via `~/.foxworks/api.json`. See PRD-09. |
 | ProspectFold intel storage | New `ProspectIntel` aggregate | Intel is a versioned snapshot with its own lifecycle — not a property of Company |
 | EmailFold email storage | Extend `Interaction` aggregate | Email is an interaction; avoid new aggregate registration overhead |
 | Research snapshot | `Note` companion record | Keeps Interaction.body clean; research is a separate artifact |
@@ -129,16 +130,24 @@ Close the feedback loop. The system learns and improves.
 
 ## For the Senior Dev (EventFold)
 
-All EventFold changes are described in PRDs 01, 02, 03, 05, 06, 07.
+**Start with [PRD-00](./PRD-00-integration-guide.md)** — it consolidates the full HTTP API spec, all 29 IPC commands, complete Tauri event catalog, all new Interaction fields, projection list, and an implementation checklist. Read it before any individual PRD.
+
+All EventFold changes are described in PRDs 01–18.
 
 **Critical files identified:**
-- `src/domain/interaction.rs` — extend for PRD-02
+- `src/domain/interaction.rs` — extend for PRD-02 (email fields) + PRD-15 (sequence fields)
 - `src/domain/` — add `prospect_intel.rs` for PRD-01
-- `src/commands.rs` — add ~10 new IPC commands across PRD-01, 02, 03
-- `src/lib.rs` — register new aggregate + commands
-- `src-frontend/src/components/companies/CompanyDetail.tsx` — paste buttons + intel tab
-- `src-frontend/src/components/apollo/ApolloSearch.tsx` — extend existing paste flow
-- NEW: `src-frontend/src/components/outbox/EmailOutbox.tsx`
-- NEW: `src-frontend/src/components/prospect-intel/ProspectIntelDetail.tsx`
+- `src/api_server.rs` — NEW: axum HTTP server for PRD-09
+- `src/commands.rs` — add 29 new IPC commands across all PRDs
+- `src/projections.rs` — add 4 new projections: EmailInteractionIndex, SequenceIndex, EmailOutreachMetrics, SequenceMetrics
+- `src/lib.rs` — register new aggregate + commands + projections + spawn API server
+- `src-frontend/src/components/companies/CompanyDetail.tsx` — intel tab (PRD-05)
+- NEW: `src-frontend/src/components/outbox/EmailOutbox.tsx` (PRD-03)
+- NEW: `src-frontend/src/components/outbox/SequenceCard.tsx` (PRD-16)
+- NEW: `src-frontend/src/components/prospect-intel/ProspectIntelDetail.tsx` (PRD-01)
+- NEW: `src-frontend/src/components/pipeline/PipelineStudio.tsx` (PRD-11)
+- NEW: `src-frontend/src/components/metrics/ProspectingMetrics.tsx` (PRD-07)
 
-**Each PRD has an "Open Questions for Senior Dev" section** with Rust/EventFold-internal decisions that only you can make.
+**Shared Electron utility:** `src/lib/foxworks-api-client.js` — add to both ProspectFold and EmailFold (canonical source in PRD-00).
+
+**Each PRD has an "Open Questions for Senior Dev" section** with Rust/EventFold-internal decisions that only you can make. Cross-PRD questions are resolved in PRD-00.
